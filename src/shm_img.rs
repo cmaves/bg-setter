@@ -1,4 +1,8 @@
-
+/*
+ * Copied from https://github.com/meh/rust-xcb-util with modifications.
+ * These modifications include adding lifetimes to the Image struct, removing return values from
+ * image functions and purging of unused functions within xcb_util::image::shm::Image
+ */
 use std::ptr;
 use std::ops::{Deref, DerefMut};
 
