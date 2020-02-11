@@ -218,8 +218,7 @@ impl <'b> XBgSetter<'b> {
 		let root = &self.roots[screen];
 		let pid = root.pid;
 		let root_window = root.root;
-		let iters = (if secs >= 4.0 { 256.0 } else { secs * 64.0 }).round();
-		let tpi = Duration::from_secs_f32(secs / iters);
+		let tpi = Duration::from_secs_f32(secs / 256.0);
 		eprintln!("fade_abs() x: {}, y: {}, tpi: {:?}", x, y, tpi);
 		if x < root.width && y < root.height {
 			let geo = xcb::get_geometry(&self.conn,pid).get_reply().unwrap();
@@ -235,7 +234,7 @@ impl <'b> XBgSetter<'b> {
 				// put the pixels in  the image 
 			shm_img::get(&self.conn, pid, &mut self.shm_img, x as i16, y as i16, 0xffffffff)
 				.unwrap();
-			let mut diffs: Vec<(f32, f32, f32)> 
+			let mut diffs: Vec<(i16, i16, i16)> 
 				= Vec::with_capacity((width as usize) * (height as usize));
 			let order = self.shm_img.byte_order();
 			for j in 0..height {
@@ -243,34 +242,42 @@ impl <'b> XBgSetter<'b> {
 					let z = self.shm_img.get(i as u32, j as u32);	
 					let (red, green, blue) = zpix_to_rgb(z, order);
 					let channels = rgb.get_pixel(i as u32, j as u32).channels();
-					let red = (red as i16).wrapping_sub(channels[0] as i16) as f32 / iters;
-					let green = (green as i16).wrapping_sub(channels[1] as i16) as f32 / iters;
-					let blue = (blue as i16).wrapping_sub(channels[2] as i16) as f32 / iters;
+					let red = (red as i16) - (channels[0] as i16);
+					let green = (green as i16) - (channels[1] as i16);
+					let blue = (blue as i16) - (channels[2] as i16);
 					diffs.push((red, green, blue));
 				}
 			}
 			//eprintln!("{:?}", diffs);
 			let start = Instant::now();
-			let iters = iters as u32;
-			let mut i = iters;
+			let mut i: u8 = 255;
 			eprintln!("width {}, height {}", width, height);
 			let mut count = 0;
-			while i > 0 {
+			loop {
+				count += 1;
 				self.put_image_shm(rgb, Some(&diffs), i);
 				shm_img::put(&self.conn, pid, self.gc, &self.shm_img, 0, 0, 
 					x as i16, y as i16, width as u16, height as u16, false);
 
 				self.set_window_bg(root_window, pid);
-				let iter_end = start + tpi * (iters - i + 1);
+				if i == 0 { 
+					break;
+				}
+				let iter_end = start + tpi * (256 - i as u32);
 				let now = Instant::now();
 				if let Some(sleep_dur) = iter_end.checked_duration_since(now) {
 					sleep(sleep_dur);
 					i -= 1;
 				} else {
-					i = i.saturating_sub((
-						now.duration_since(iter_end).div_duration_f32(tpi) as u32) + 1);
+					let iter_elapsed = now.duration_since(iter_end).div_duration_f32(tpi);
+					if iter_elapsed > 255.0 {
+						i = 0
+					} else {
+						let iter_elapsed = iter_elapsed as u8;
+						i = i.saturating_sub(iter_elapsed);
+						i = i.saturating_sub(1);
+					}
 				}
-				count += 1;
 			}
 			let elapsed= Instant::now().duration_since(start);
 			eprintln!("It took {:?} secs to run {} iters ({} fps)", elapsed, count, 
@@ -285,7 +292,7 @@ impl <'b> XBgSetter<'b> {
 		let (x, y) = self.screen_to_abs(screen, display, x, y);
 		self.fade_abs(screen, x, y , rgb, secs);
 	}
-	fn put_image_shm(&mut self, rgb: &RgbImage, diffs: Option<&[(f32, f32, f32)]>, iter: u32)
+	fn put_image_shm(&mut self, rgb: &RgbImage, diffs: Option<&[(i16, i16, i16)]>, iter: u8)
 	{
 		let (stride, data) = unsafe { 
 			let image = &*(self.shm_img.base.0);
@@ -299,18 +306,21 @@ impl <'b> XBgSetter<'b> {
 		//unsafe { eprintln!("{}", (*(self.shm_img.base.0)).depth); }
 		let order = self.shm_img.byte_order();
 		let start = Instant::now();
-		let iter = iter as f32;
+		let iter = iter as i32;
 		for n in 0..height {
 			let row_start = stride * n;
 			let row = &mut data[row_start..row_start+width*4];
 			for m in 0..width {
 				let channels = rgb.get_pixel(m as u32, n as u32);
-				let (r, g, b) = if let Some(diffs) = diffs {
+				let (r, g, b) =  if iter == 0 {
+					(channels[0], channels[1], channels[2])
+				} else if let Some(diffs) = diffs {
 					let (r, g, b) = diffs[width * n + m];
-					let (r, g, b) = (iter * r, iter * g, iter * b);
-					let (r, g, b) = (r + channels[0] as f32, g + channels[1] as f32, 
-						b + channels[2] as f32);
-					(r.round() as u8, g.round() as u8, b.round() as u8)
+					let (r, g, b) = (r as i32, g as i32, b as i32);
+					let (r, g, b) = (iter * r / 256, iter * g / 256, iter * b / 256);
+					let (r, g, b) = (r + channels[0] as i32, g + channels[1] as i32, 
+						b + channels[2] as i32);
+					(r as u8, g as u8, b as u8)
 				} else {
 					(channels[0], channels[1], channels[2])
 				};
