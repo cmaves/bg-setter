@@ -23,7 +23,8 @@ lazy_static! {
 #[test]
 fn test_replace() {
 	let (conn, _) = xcb::Connection::connect(None).unwrap();
-	let mut bg = XBgSetter::new(&conn,true).unwrap();
+	let mut bg = XBgSetter::new(&conn).unwrap();
+	bg.set_verbose(true);
 	let dur = Duration::from_millis(2500);
 	for i in 0..5 {
 		bg.replace(0, 0, i % 5 * 100, i % 5 * 100, &images[i as usize % images.len()]);
@@ -38,7 +39,8 @@ fn test_replace() {
 #[test]
 fn test_fade() {
 	let (conn, _) = xcb::Connection::connect(None).unwrap();
-	let mut bg = XBgSetter::new(&conn,true).unwrap();
+	let mut bg = XBgSetter::new(&conn).unwrap();
+	bg.set_verbose(true);
 	let dur = Duration::from_millis(2500);
 	for i in 0..5 {
 		bg.fade(0, 0, i % 5 * 100, i % 5 * 100, &images[i as usize % images.len()], 5.0);
